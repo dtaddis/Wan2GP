@@ -1,0 +1,5 @@
+{
+  "name": "Range-Scheduled Video Processor",
+  "version": "1.0.0",
+  "description": "Processes full videos with an end-time CSV prompt manifest and a global negative prompt."
+}

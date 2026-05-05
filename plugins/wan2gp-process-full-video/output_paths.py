@@ -37,6 +37,12 @@ def get_process_filename_token(process_name: str) -> str:
     return token or "process"
 
 
+def get_safe_filename_stem(value: str) -> str:
+    token = "".join(char if char.isalnum() or char in {"-", "_"} else "_" for char in str(value or "").strip())
+    token = "_".join(part for part in token.split("_") if len(part) > 0)
+    return token or "process"
+
+
 def _supported_suffix(preferred_suffix: str, default_container: str) -> str:
     preferred_container = str(preferred_suffix or "").strip().lower().lstrip(".")
     if preferred_container in constants.SUPPORTED_OUTPUT_CONTAINERS:
@@ -63,6 +69,16 @@ def build_auto_output_path(source_path: str, process_name: str, ratio_text: str,
 def make_output_variant(output: Path, *, notify: Callable[[str], None] | None = None) -> str:
     for index in range(2, 10000):
         candidate = output.with_name(f"{output.stem}_{index}{output.suffix}")
+        if not candidate.exists():
+            if notify is not None:
+                notify(f"Output file already exists. Using {candidate}")
+            return str(candidate)
+    raise gr.Error(f"Unable to find a free output filename for {output}")
+
+
+def make_versioned_output_variant(output: Path, *, notify: Callable[[str], None] | None = None) -> str:
+    for index in range(2, 10000):
+        candidate = output.with_name(f"{output.stem}_v{index:03d}{output.suffix}")
         if not candidate.exists():
             if notify is not None:
                 notify(f"Output file already exists. Using {candidate}")
@@ -125,6 +141,44 @@ def build_requested_output_path(source_path: str, output_path: str, process_name
         supported_text = ", ".join(f".{container}" for container in sorted(constants.SUPPORTED_OUTPUT_CONTAINERS))
         raise gr.Error(f"Output File must use one of these container extensions: {supported_text}.")
     return output
+
+
+def build_manifest_auto_output_path(source_path: str, manifest_stem: str, output_resolution: str, start_seconds: float | None, end_seconds: float | None, output_dir: str | None = None, *, default_container: str = "mp4") -> str:
+    source = Path(source_path)
+    target_dir = source.parent if not output_dir else Path(output_dir)
+    output_suffix = _supported_suffix(source.suffix, default_container)
+    name_parts = [
+        get_safe_filename_stem(manifest_stem),
+        str(output_resolution or "").strip() or "res",
+        format_time_token(start_seconds),
+        format_time_token(end_seconds),
+    ]
+    return str(target_dir / f"{'_'.join(name_parts)}{output_suffix}")
+
+
+def build_manifest_requested_output_path(source_path: str, output_path: str, manifest_stem: str, output_resolution: str, start_seconds: float | None, end_seconds: float | None, *, default_container: str = "mp4") -> Path:
+    output_text = str(output_path or "").strip()
+    if len(output_text) == 0:
+        output = Path(build_manifest_auto_output_path(source_path, manifest_stem, output_resolution, start_seconds, end_seconds, default_container=default_container))
+    elif output_text.endswith(("\\", "/")) or Path(output_text).is_dir():
+        output = Path(build_manifest_auto_output_path(source_path, manifest_stem, output_resolution, start_seconds, end_seconds, output_dir=output_text, default_container=default_container))
+    else:
+        output = Path(output_text)
+    if not output.suffix:
+        output = output.with_suffix(_supported_suffix("", default_container))
+    elif output.suffix.lstrip(".").lower() not in constants.SUPPORTED_OUTPUT_CONTAINERS:
+        supported_text = ", ".join(f".{container}" for container in sorted(constants.SUPPORTED_OUTPUT_CONTAINERS))
+        raise gr.Error(f"Output File must use one of these container extensions: {supported_text}.")
+    return output
+
+
+def resolve_manifest_output_path(source_path: str, output_path: str, manifest_stem: str, output_resolution: str, start_seconds: float | None, end_seconds: float | None, continue_enabled: bool, *, default_container: str = "mp4", notify: Callable[[str], None] | None = None) -> tuple[str, bool]:
+    output = build_manifest_requested_output_path(source_path, output_path, manifest_stem, output_resolution, start_seconds, end_seconds, default_container=default_container)
+    if continue_enabled:
+        return str(output), output.exists()
+    if output.exists():
+        return make_versioned_output_variant(output, notify=notify), False
+    return str(output), False
 
 
 def resolve_output_path(source_path: str, output_path: str, process_name: str, ratio_text: str, output_resolution: str, start_seconds: float | None, end_seconds: float | None, continue_enabled: bool, *, has_outpaint: bool = False, default_container: str = "mp4", notify: Callable[[str], None] | None = None) -> tuple[str, bool]:

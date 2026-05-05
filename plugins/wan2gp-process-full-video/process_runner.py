@@ -41,6 +41,9 @@ class RunRequest:
     sliding_window_overlap: object = 1
     start_seconds: str = ""
     end_seconds: str = ""
+    manifest_path: str = ""
+    positive_prefix: str = ""
+    negative_prompt: str = ""
 
     @classmethod
     def from_gradio(
@@ -60,6 +63,9 @@ class RunRequest:
         sliding_window_overlap=1,
         start_seconds="",
         end_seconds="",
+        manifest_path="",
+        positive_prefix="",
+        negative_prompt="",
     ) -> "RunRequest":
         return cls(
             state=state,
@@ -77,6 +83,9 @@ class RunRequest:
             sliding_window_overlap=sliding_window_overlap,
             start_seconds="" if start_seconds in (None, "") else str(start_seconds),
             end_seconds="" if end_seconds in (None, "") else str(end_seconds),
+            manifest_path=str(manifest_path or "").strip().strip('"'),
+            positive_prefix=str(positive_prefix or ""),
+            negative_prompt=str(negative_prompt or ""),
         )
 
 
@@ -93,11 +102,11 @@ class ProcessRunner:
         self.info_exit = info_exit
         self.reset_live_chunk_status = reset_live_chunk_status
 
-    def start_process(self, state=None, process_name="", user_refs=None, source_path="", process_strength=None, output_path="", prompt_text="", continue_enabled=True, source_audio_track="", output_resolution="720p", target_ratio="", chunk_size_seconds=10.0, sliding_window_overlap=1, start_seconds="", end_seconds=""):
+    def start_process(self, state=None, process_name="", user_refs=None, source_path="", process_strength=None, output_path="", prompt_text="", continue_enabled=True, source_audio_track="", output_resolution="720p", target_ratio="", chunk_size_seconds=10.0, sliding_window_overlap=1, start_seconds="", end_seconds="", manifest_path="", positive_prefix="", negative_prompt=""):
         if self.active_job.get("running"):
             yield self.info_exit("A process is already running.")
             return
-        request = RunRequest.from_gradio(state, process_name, user_refs, source_path, process_strength, output_path, prompt_text, continue_enabled, source_audio_track, output_resolution, target_ratio, chunk_size_seconds, sliding_window_overlap, start_seconds, end_seconds)
+        request = RunRequest.from_gradio(state, process_name, user_refs, source_path, process_strength, output_path, prompt_text, continue_enabled, source_audio_track, output_resolution, target_ratio, chunk_size_seconds, sliding_window_overlap, start_seconds, end_seconds, manifest_path, positive_prefix, negative_prompt)
         process_definition = self.library.process_definition(request.process_name, request.state, request.user_refs)
         if process_definition is None:
             yield self.info_exit(f"Unsupported process: {request.process_name}")
@@ -168,8 +177,15 @@ class ProcessRunner:
         except gr.Error as exc:
             yield self.info_exit(common.get_error_message(exc) or "Invalid start/end selection.")
             return
+        range_prompt_schedule: list[prompts.RangePrompt] = []
+        manifest_output_stem = ""
         try:
-            prompt_schedule = prompts.parse_prompt_schedule(prompt_text)
+            if len(request.manifest_path) > 0:
+                range_prompt_schedule = prompts.parse_range_prompt_manifest(request.manifest_path)
+                manifest_output_stem = Path(request.manifest_path).stem
+                prompt_schedule = [(0.0, "")]
+            else:
+                prompt_schedule = prompts.parse_prompt_schedule(prompt_text)
         except gr.Error as exc:
             yield self.info_exit(common.get_error_message(exc) or f"Invalid prompt syntax.\n\nExample:\n{prompts.TIMED_PROMPT_EXAMPLE}")
             return
@@ -204,6 +220,7 @@ class ProcessRunner:
                     end_seconds=end_seconds,
                     model_type=model_type,
                     uses_builtin_outpaint_ui=uses_builtin_outpaint_ui,
+                    manifest_output_stem=manifest_output_stem,
                 )
                 verbose_level = prepared_run.verbose_level
                 start_frame = prepared_run.start_frame
@@ -429,7 +446,10 @@ class ProcessRunner:
                 source_path=source_path,
                 selected_audio_track=selected_audio_track,
                 prompt_schedule=prompt_schedule,
+                range_prompt_schedule=range_prompt_schedule,
                 default_prompt_text=default_prompt_text,
+                positive_prefix=request.positive_prefix,
+                negative_prompt=request.negative_prompt,
                 budget_resolution=budget_resolution,
                 start_frame=start_frame,
                 resumed_unique_frames=resumed_unique_frames,
@@ -566,6 +586,10 @@ class ProcessRunner:
                 "source_segment": requested_source_segment,
                 "merged_continuations": process_metadata.normalize_merged_continuation_signatures(merged_continuation_signatures),
             }
+            if len(request.manifest_path) > 0:
+                output_process_metadata["manifest_path"] = str(Path(request.manifest_path).resolve())
+                output_process_metadata["manifest_stem"] = Path(request.manifest_path).stem
+                output_process_metadata["global_negative_prompt"] = request.negative_prompt
             if process_is_hdr:
                 output_process_metadata["hdr"] = True
             process_metadata.store_output_metadata(metadata_target_path, metadata_source_path, source_path=source_path, process_name=process_display_name, source_start_seconds=start_seconds, start_frame=start_frame, fps_float=fps_float, selected_audio_track=selected_audio_track, total_generation_time=total_generation_time, actual_frame_count=actual_output_frames, process_metadata=output_process_metadata, verbose_level=verbose_level)

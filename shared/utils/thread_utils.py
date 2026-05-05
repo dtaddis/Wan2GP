@@ -6,6 +6,13 @@ import traceback
 from threading import Thread, Lock
 
 
+def _queue_sleep(seconds=0.001):
+    try:
+        time.sleep(seconds)
+    except OSError:
+        time.sleep(0.05)
+
+
 class _TaskRunner:
     def __init__(self, runner_name="default"):
         self.runner_name = str(runner_name or "default")
@@ -22,7 +29,7 @@ class _TaskRunner:
                     task = self.task_queue.pop(0)
                     
             if task is None:
-                time.sleep(0.001)
+                _queue_sleep()
                 continue
                 
             func, args, kwargs, thread_name = task
@@ -107,7 +114,7 @@ class FIFOQueue:
                 if self.queue:
                     return self.queue.pop(0)
 
-            time.sleep(0.001)
+            _queue_sleep()
 
 
 class AsyncStream:

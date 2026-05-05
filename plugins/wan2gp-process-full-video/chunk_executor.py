@@ -61,7 +61,10 @@ class ProcessContext:
     source_path: str
     selected_audio_track: int | None
     prompt_schedule: list[tuple[float, str]]
+    range_prompt_schedule: list[prompts.RangePrompt]
     default_prompt_text: str
+    positive_prefix: str
+    negative_prompt: str
     budget_resolution: str
     start_frame: int
     resumed_unique_frames: int
@@ -132,13 +135,23 @@ class ChunkExecutor:
             )
             settings = build_task_settings(context.process_settings, is_user_process=context.is_user_process)
             chunk_prompt_start_seconds = float(actual_done) / float(context.fps_float)
+            chunk_prompt_end_seconds = float(actual_done + max(1, plan_requested_frames - plan_overlap_frames)) / float(context.fps_float)
             settings["model_type"] = context.model_type
-            settings["prompt"] = prompts.resolve_prompt_for_chunk(context.prompt_schedule, chunk_prompt_start_seconds, context.default_prompt_text)
+            if len(context.range_prompt_schedule) > 0:
+                settings["prompt"] = prompts.resolve_range_prompt_for_chunk(context.range_prompt_schedule, chunk_prompt_start_seconds, chunk_prompt_end_seconds, context.positive_prefix, context.default_prompt_text)
+            else:
+                settings["prompt"] = prompts.resolve_prompt_for_chunk(context.prompt_schedule, chunk_prompt_start_seconds, context.default_prompt_text)
+            if len(str(context.negative_prompt or "").strip()) > 0:
+                settings["negative_prompt"] = str(context.negative_prompt or "").strip()
             settings["resolution"] = progress.resolved_resolution or context.budget_resolution
             settings["video_length"] = model_video_length
             settings["sliding_window_overlap"] = plan_overlap_frames if plan_overlap_frames > 0 else 1
             settings["image_prompt_type"] = "V" if needs_video_source else ""
-            settings["audio_prompt_type"] = "K"
+            # The assembled full-video output copies/muxes source audio itself.
+            # Feeding control audio into each model chunk can make WanGP clamp
+            # the requested frame count to a slightly short extracted audio
+            # segment, especially for virtual frame ranges from 23.976 sources.
+            settings["audio_prompt_type"] = "A"
             if context.is_user_process:
                 settings["force_fps"] = "control"
             settings["video_guide"] = build_virtual_media_path(context.source_path, start_frame=actual_control_start_frame, end_frame=actual_control_end_frame, audio_track_no=context.selected_audio_track)

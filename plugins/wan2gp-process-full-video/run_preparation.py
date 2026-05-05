@@ -75,6 +75,7 @@ def prepare_run(
     end_seconds: float | None,
     model_type: str,
     uses_builtin_outpaint_ui: bool,
+    manifest_output_stem: str = "",
 ) -> PreparedRun:
     verbose_level = get_mmgp_verbose_level()
     try:
@@ -123,12 +124,18 @@ def prepare_run(
     requested_unique_frames = frames.count_planned_unique_frames(full_plans)
     requested_source_segment = build_virtual_media_path(source_path, start_frame=start_frame, end_frame=start_frame + requested_unique_frames - 1, audio_track_no=selected_audio_track)
     default_output_container = media.normalize_container_name(plugin.server_config.get("video_container", "mp4"))
-    requested_output_path = str(output_paths.build_requested_output_path(source_path, output_path, process_display_name, active_target_ratio, output_resolution, start_seconds, end_seconds, has_outpaint=uses_builtin_outpaint_ui, default_container=default_output_container))
+    if len(str(manifest_output_stem or "").strip()) > 0:
+        requested_output_path = str(output_paths.build_manifest_requested_output_path(source_path, output_path, manifest_output_stem, output_resolution, start_seconds, end_seconds, default_container=default_output_container))
+    else:
+        requested_output_path = str(output_paths.build_requested_output_path(source_path, output_path, process_display_name, active_target_ratio, output_resolution, start_seconds, end_seconds, has_outpaint=uses_builtin_outpaint_ui, default_container=default_output_container))
     if continue_enabled:
         identity_mismatch_message = process_metadata.get_output_identity_mismatch_message(requested_output_path, process_name=process_display_name, source_path=source_path, source_segment=requested_source_segment)
         if identity_mismatch_message is not None:
             raise ProcessInfoExit(identity_mismatch_message, output_path=requested_output_path)
-    resolved_output_path, resume_existing_output = output_paths.resolve_output_path(source_path, output_path, process_display_name, active_target_ratio, output_resolution, start_seconds, end_seconds, continue_enabled, has_outpaint=uses_builtin_outpaint_ui, default_container=default_output_container, notify=common.plugin_info)
+    if len(str(manifest_output_stem or "").strip()) > 0:
+        resolved_output_path, resume_existing_output = output_paths.resolve_manifest_output_path(source_path, output_path, manifest_output_stem, output_resolution, start_seconds, end_seconds, continue_enabled, default_container=default_output_container, notify=common.plugin_info)
+    else:
+        resolved_output_path, resume_existing_output = output_paths.resolve_output_path(source_path, output_path, process_display_name, active_target_ratio, output_resolution, start_seconds, end_seconds, continue_enabled, has_outpaint=uses_builtin_outpaint_ui, default_container=default_output_container, notify=common.plugin_info)
     try:
         Path(resolved_output_path).parent.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
