@@ -148,10 +148,10 @@ class ChunkExecutor:
             settings["sliding_window_overlap"] = plan_overlap_frames if plan_overlap_frames > 0 else 1
             settings["image_prompt_type"] = "V" if needs_video_source else ""
             # The assembled full-video output copies/muxes source audio itself.
-            # Feeding control audio into each model chunk can make WanGP clamp
-            # the requested frame count to a slightly short extracted audio
-            # segment, especially for virtual frame ranges from 23.976 sources.
-            settings["audio_prompt_type"] = "A"
+            # Any per-chunk audio guide can make WanGP clamp the requested frame
+            # count to audio duration. That is especially brittle for virtual
+            # frame ranges and continuation chunks where overlap is added later.
+            settings["audio_prompt_type"] = ""
             if context.is_user_process:
                 settings["force_fps"] = "control"
             settings["video_guide"] = build_virtual_media_path(context.source_path, start_frame=actual_control_start_frame, end_frame=actual_control_end_frame, audio_track_no=context.selected_audio_track)
