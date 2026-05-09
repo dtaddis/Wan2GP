@@ -93,7 +93,22 @@ class EnvsManager:
             print(f"[!] Environment '{name}' not found.")
 
     def add_env(self, name, type, path):
-        self.data["envs"][name] = {"type": type, "path": path}
+        if path:
+            cwd = os.getcwd()
+            abs_path = os.path.abspath(path)
+            try:
+                rel_path = os.path.relpath(abs_path, cwd)
+                if rel_path.startswith("..") or rel_path == ".":
+                    final_path = abs_path
+                else:
+                    final_path = os.path.join(".", rel_path)
+            except ValueError:
+                final_path = abs_path
+        else:
+            final_path = ""
+
+        self.data["envs"][name] = {"type": type, "path": final_path}
+        
         if not self.data["active"]:
             self.data["active"] = name
         self.save()
@@ -242,6 +257,15 @@ def run_cmd(cmd, env_vars=None):
 
     subprocess.run(cmd, shell=True, check=True, env=custom_env)
 
+def install_plugin_requirements(pip_cmd):
+    plugins_dir = "plugins"
+    if os.path.exists(plugins_dir) and os.path.isdir(plugins_dir):
+        for entry in os.listdir(plugins_dir):
+            plugin_req = os.path.join(plugins_dir, entry, "requirements.txt")
+            if os.path.isfile(plugin_req):
+                print(f"\n[*] Installing requirements for plugin '{entry}'...")
+                run_cmd(f"{pip_cmd} -r \"{plugin_req}\"")
+
 def get_env_details(name, env_data):
     env_type = env_data["type"]
     dir_name = env_data["path"]
@@ -352,6 +376,8 @@ def install_logic(env_name, env_type, env_path, py_k, torch_k, triton_k, sage_k,
         if k in config['components']['kernels']:
             cmd = resolve_cmd(config['components']['kernels'][k]['cmd'])
             if cmd: run_cmd(f"{pip} {cmd}")
+            
+    install_plugin_requirements(pip)
 
 def menu(title, options, recommended_key=None):
     print(f"\n--- {title} ---")
@@ -552,7 +578,6 @@ def do_manage():
                 print("3. conda")
                 t_choice = input("Choice (Default 1): ")
                 e_type = "uv" if t_choice == "2" else "conda" if t_choice == "3" else "venv"
-                
                 manager.add_env(name, e_type, os.path.abspath(path))
                 print(f"[*] Registered '{name}' at {os.path.abspath(path)}")
             input("Press Enter...")
@@ -818,8 +843,8 @@ if __name__ == "__main__":
         if needs_install:
             print("\n[*] Updates found. Installing/Verifying requirements...")
             install_fmt = ENV_TEMPLATES[env_data['type']]['install']
-            cmd = f"{install_fmt.format(dir=env_data['path'])} -r requirements.txt"
-            run_cmd(cmd)
+            pip_cmd = install_fmt.format(dir=env_data['path'])
+            run_cmd(f"{pip_cmd} -r requirements.txt")
         else:
             print("\n[*] Code is already up to date. Skipping requirements installation.")
 
