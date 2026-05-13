@@ -33,6 +33,33 @@ WanGP supports the Wan (and derived models) but also Hunyuan Video, Flux, Qwen, 
 
 
 ## 🔥 Latest Updates : 
+### 12th of May 2026: WanGP v11.66, Can you keep up?
+
+- **HiDreamO1**: New Image Image model with editing capabilities is quite good to preserve identify and write text. WanGP version requires very Low VRAM and supports out of the Box *Control Image* & *Preview*.
+
+- **Omnivoice**: This *Text To Speech model* (TTS) is fast and supports 100 languages with voice cloning. WanGP offers as a bonus an experimental dialogue mode (not the best one since it is hard to predict when Omnivoice has finished generating)
+
+- **ScenemeAI**: A LTX2.3 derived *TTS* that leverages *LTX-2* world knowledge : it can produce lifelike audio generations since you can drive the audio generation by describing what a speaker is doing / saying. I have implemented on top a dialogue mode between any number of speakers (first two speakers support voice cloning) with very smooth transitions between speakers especially when generating English. You will find ScenemeAI among the *TTS models* but be aware it will use by default a *Video Memory Profile* since it uses LTX2 engine behind the scene. Don't hesitate to use WanGP *Prompt Enhancer* to generate lively dialogues.
+
+- **MPS / Apple Early Support**: Mac users are about to discover the world of WanGP albeit for start it wont be fast nor very optimized and not all models will be supported. Many thanks to *huangyebiaoke* (for the port), *cn0ss* & *SquishedSquirrel* (for the testing). Don't hesitate to report in the new *MPS* Discord channel your feedback if you are a mac user.
+
+### 9th of May 2026: WanGP v11.61, The Last Mile
+
+With a slight (half year) delay WanGP supports now officially *FlashVSR* a very high quality *Spatial Upsampler* which can upsample up to 4x you videos. As FlashVSR has been almost entirely rewritten for WanGP, it can be branded as the *Ultimate Upsampler for the GPU Poor*, check these figures:
+- x2 Spatial Upsampling will need to work only 6GB of VRAM
+- x4 Spatial Upsampling will require only 10GB of VRAM (see the 5k example below)
+
+The VRAM requirements above are independent of the Video Length (still the longer the video the more RAM)
+
+You first need to install *Triton* and optionally *SpargeAttention* for best quality (please check the INSTALLATION.md for download links) and enable *FlashVSR* in the *Configuration > Extensions* Tab.
+
+FlashVSR is available in the following contexts:
+- a Postprocessing option in *Advanced Tab > Postprocessing*
+- a *Late Postprocessing* that can be applied on already generated videos
+- in Model *WanGP System Postprocessing* of the *Process Full Video* Plugin you can Upsample a few hours long Video !
+
+Please note as FlashVSR is now natively supported by WanGP and highly optimized, you may no longer need the *FlashVSR Plugin* developed by @h4k4z3. In any case many thanks to @h4k4z3 for developing this plugin which was very useful.
+
 ### 2nd of May 2026: WanGP v11.52, a Kind of Magic
 
 - **Vista 4D**: Vista4D allows a *Video Reshooting* of a *Dynamic scene* from novel camera trajectories and viewpoints. In other words this Wan 2.1 model will let you relive from a different (moving) perspective a scene with moving people or objects. The sequences are quite short (usually 49 frames, max around 97 frames) but it is a lot of fun as for once this really works. 
@@ -259,7 +286,7 @@ git clone https://github.com/deepbeepmeep/Wan2GP.git
 cd Wan2GP
 conda create -n wan2gp python=3.11.14
 conda activate wan2gp
-pip install torch==2.10.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130
+pip install torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/cu130
 pip install -r requirements.txt
 ```
 
@@ -270,7 +297,7 @@ git clone https://github.com/deepbeepmeep/Wan2GP.git
 cd Wan2GP
 conda create -n wan2gp python=3.10.9
 conda activate wan2gp
-pip install torch==2.7.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/test/cu128
+pip install torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/test/cu128
 pip install -r requirements.txt
 ```
 
@@ -300,9 +327,9 @@ conda rename -n wan2gp  old_wan2gp
 Get in the directory where WanGP is installed and:
 ```bash
 git pull
-conda create -n wa2gp python=3.11.9
+conda create -n wan2gp python=3.11.9
 conda activate wan2gp
-pip install torch==2.10.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130
+pip install torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/cu130
 pip install -r requirements.txt
 ```
 
