@@ -6,12 +6,16 @@ from pathlib import Path
 
 import gradio as gr
 
+frame_planning = importlib.import_module("wan2gp-process-full-video.frame_planning")
+output_paths = importlib.import_module("wan2gp-process-full-video.output_paths")
 process_catalog = importlib.import_module("wan2gp-process-full-video.process_catalog")
 process_library = importlib.import_module("wan2gp-process-full-video.process_library")
 process_runner = importlib.import_module("wan2gp-process-full-video.process_runner")
 status_ui = importlib.import_module("wan2gp-process-full-video.status_ui")
+video_buffers = importlib.import_module("wan2gp-process-full-video.video_buffers")
 common = importlib.import_module("wan2gp-process-full-video.common")
 prompts = importlib.import_module("wan2gp-process-full-video.prompt_schedule")
+from shared.utils.utils import get_video_info_details
 
 
 DEFAULT_NEGATIVE_PROMPT = (
@@ -21,6 +25,20 @@ DEFAULT_NEGATIVE_PROMPT = (
     "sunburn, magenta faces, orange faces, ruddy faces, crimson cheeks, tomato red faces, blotchy red skin, "
     "oversaturated skin, waxy skin, flickering color, pulsing color, breathing saturation, temporal color shift"
 )
+
+
+class _CompatProcessContext:
+    def __init__(self, **kwargs):
+        defaults = {
+            "range_prompt_schedule": [],
+            "positive_prefix": "",
+            "negative_prompt": "",
+        }
+        defaults.update(kwargs)
+        self.__dict__.update(defaults)
+
+
+process_runner.ProcessContext = _CompatProcessContext
 
 
 def _choices_for_model(library, model_type: str, user_refs: list[str]):
@@ -42,6 +60,65 @@ def _process_strength_value(library, process_name: str, main_state: dict | None,
         if user_default is not None:
             return user_default
     return common.get_default_process_strength(settings)
+
+
+def _format_schedule_time(seconds: float) -> str:
+    seconds = max(0.0, float(seconds or 0.0))
+    whole = int(seconds)
+    frac = seconds - whole
+    minutes, sec = divmod(whole, 60)
+    hours, minutes = divmod(minutes, 60)
+    if frac > 0:
+        sec_text = f"{sec + frac:06.3f}".rstrip("0").rstrip(".")
+    else:
+        sec_text = f"{sec:02d}"
+    return f"{hours:02d}:{minutes:02d}:{sec_text}" if hours > 0 else f"{minutes:02d}:{sec_text}"
+
+
+def _build_chunk_prompt_schedule_text(self, manifest_path: str, positive_prefix: str, default_prompt: str, source_path: str, model_type: str, chunk_size_seconds, sliding_window_overlap, start_seconds, end_seconds) -> str:
+    range_schedule = prompts.parse_range_prompt_manifest(manifest_path)
+    metadata = get_video_info_details(source_path)
+    start_value = prompts.parse_time_input(start_seconds, label="Start", allow_empty=False)
+    end_value = prompts.parse_time_input(end_seconds, label="End", allow_empty=True)
+    start_frame, end_frame_exclusive, fps_float, total_source_frames = video_buffers.compute_selected_frame_range(metadata, start_value, end_value)
+    processing_fps = video_buffers.get_processing_fps(fps_float)
+    rules = frame_planning.get_frame_plan_rules(model_type, self.get_model_def)
+    chunk_frames = frame_planning.normalize_chunk_frames(common.require_float(chunk_size_seconds, "Chunk Size", minimum=0.1), processing_fps, frame_step=rules.frame_step, minimum_requested_frames=rules.minimum_requested_frames)
+    overlap_frames = frame_planning.normalize_overlap_frames(common.require_int(sliding_window_overlap, "Sliding Window Overlap", minimum=1), frame_step=rules.frame_step)
+    plans = frame_planning.build_chunk_plan(
+        start_frame,
+        end_frame_exclusive,
+        total_source_frames,
+        chunk_frames,
+        frame_step=rules.frame_step,
+        minimum_requested_frames=rules.minimum_requested_frames,
+        overlap_frames=overlap_frames,
+    )
+    entries: list[str] = []
+    actual_done = 0
+    for plan in plans:
+        unique_frames = max(1, plan.requested_frames - plan.overlap_frames)
+        chunk_start = float(actual_done) / float(fps_float)
+        chunk_end = float(actual_done + unique_frames) / float(fps_float)
+        prompt_text = prompts.resolve_range_prompt_for_chunk(range_schedule, chunk_start, chunk_end, positive_prefix, default_prompt)
+        entries.append(f"{_format_schedule_time(chunk_start)}\n{prompt_text}")
+        actual_done += unique_frames
+    return "\n\n".join(entries)
+
+
+def _manifest_output_path(source_path: str, output_path: str, manifest_path: str, output_resolution: str, start_seconds, end_seconds) -> str:
+    output_text = str(output_path or "").strip()
+    if len(output_text) > 0 and not output_text.endswith(("\\", "/")) and not Path(output_text).is_dir():
+        return output_text
+    manifest_stem = Path(str(manifest_path or "").strip().strip('"')).stem
+    start_value = prompts.parse_time_input(start_seconds, label="Start", allow_empty=False)
+    end_value = prompts.parse_time_input(end_seconds, label="End", allow_empty=True)
+    if hasattr(output_paths, "build_manifest_requested_output_path"):
+        return str(output_paths.build_manifest_requested_output_path(source_path, output_text, manifest_stem, output_resolution, start_value, end_value))
+    target_dir = Path(output_text) if len(output_text) > 0 else Path(source_path).parent
+    safe_stem = "".join(char if char.isalnum() or char in {"-", "_"} else "_" for char in manifest_stem).strip("_") or "process"
+    suffix = Path(source_path).suffix or ".mp4"
+    return str(target_dir / f"{safe_stem}_{str(output_resolution or 'res').strip() or 'res'}{suffix}")
 
 
 def create_config_ui(self, api_session):
@@ -142,6 +219,60 @@ def create_config_ui(self, api_session):
         last_end = schedule[-1].end_seconds if schedule else 0.0
         return f"{manifest_stem}: {len(schedule)} range(s), ending at {last_end:.2f}s."
 
+    def start_range_process(state, process_name, user_refs, source_path, process_strength, output_path, _prompt_text, continue_enabled, source_audio_track, output_resolution, target_ratio, chunk_size_seconds, sliding_window_overlap, start_seconds, end_seconds, manifest_path, positive_prefix, negative_prompt):
+        process_definition = library.process_definition(process_name, state, user_refs)
+        process_settings = process_definition.get("settings", {}) if isinstance(process_definition, dict) else {}
+        model_type = str(process_settings.get("model_type") or "")
+        default_prompt = str(process_settings.get("prompt") or "")
+        try:
+            prompt_text = _build_chunk_prompt_schedule_text(
+                self,
+                manifest_path,
+                positive_prefix,
+                default_prompt,
+                source_path,
+                model_type,
+                chunk_size_seconds,
+                sliding_window_overlap,
+                start_seconds,
+                end_seconds,
+            )
+            resolved_output_path = _manifest_output_path(source_path, output_path, manifest_path, output_resolution, start_seconds, end_seconds)
+        except gr.Error as exc:
+            yield _info_exit(common.get_error_message(exc) or "Invalid range-scheduled settings.")
+            return
+        except Exception as exc:
+            yield _info_exit(f"Invalid range-scheduled settings: {exc}")
+            return
+
+        previous_negative = process_settings.get("negative_prompt")
+        has_previous_negative = "negative_prompt" in process_settings
+        if len(str(negative_prompt or "").strip()) > 0:
+            process_settings["negative_prompt"] = str(negative_prompt or "").strip()
+        try:
+            yield from runner.start_process(
+                state,
+                process_name,
+                user_refs,
+                source_path,
+                process_strength,
+                resolved_output_path,
+                prompt_text,
+                continue_enabled,
+                source_audio_track,
+                output_resolution,
+                target_ratio,
+                chunk_size_seconds,
+                sliding_window_overlap,
+                start_seconds,
+                end_seconds,
+            )
+        finally:
+            if has_previous_negative:
+                process_settings["negative_prompt"] = previous_negative
+            else:
+                process_settings.pop("negative_prompt", None)
+
     def stop_process():
         active_job["cancel_requested"] = True
         write_state = active_job.get("write_state")
@@ -199,7 +330,7 @@ def create_config_ui(self, api_session):
     start_seconds.change(fn=lambda value: gr.update(value=_time_hint_update(value), visible=len(_time_hint_update(value)) > 0), inputs=[start_seconds], outputs=[time_hint], queue=False, show_progress="hidden")
     end_seconds.change(fn=lambda value: gr.update(value=_time_hint_update(value), visible=len(_time_hint_update(value)) > 0), inputs=[end_seconds], outputs=[time_hint], queue=False, show_progress="hidden")
     start_btn.click(
-        fn=runner.start_process,
+        fn=start_range_process,
         inputs=[
             self.state,
             process_name,
